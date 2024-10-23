@@ -1,0 +1,26 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel GeneSheepRandomizer
+
+float RngOffset;
+int NumSpecies;
+RWTexture2D<float4> Result;
+
+float random(float2 p)
+{
+	float3 p3  = frac(float3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z + RngOffset);
+}
+
+float4 GetColorFromSpecies(uint species) {
+    return float4((species >> 2) & 1, (species >> 1) & 1, species & 1, (species >> 3) & 1);
+}
+
+
+[numthreads(8,8,1)]
+void GeneSheepRandomizer (uint3 id : SV_DispatchThreadID)
+{
+    // populate Result with random species
+    int species = int(random(id.xy) * NumSpecies);
+    Result[id.xy] = GetColorFromSpecies(species);
+}

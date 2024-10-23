@@ -1,0 +1,16 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel SetBufferConstant
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWBuffer<uint> Result;
+uint Val;
+uint Width;
+
+[numthreads(8,8,1)]
+void SetBufferConstant (uint3 id : SV_DispatchThreadID)
+{
+    // TODO: insert actual code here!
+
+    Result[id.y * Width + id.x] = Val;
+}

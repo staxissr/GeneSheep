@@ -1,0 +1,197 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel GeneSheep
+
+int UpdateRule;
+float Width;
+float Height;
+float RngOffset;
+float PixelChangeScale;
+sampler2D Input;
+RWBuffer<int> NumChanges;
+RWBuffer<int> NumSleeping;
+RWTexture2D<float4> Result;
+RWTexture2D<float4> Colors;
+RWBuffer<uint> Sleeping;
+RWBuffer<uint> WillWake;
+
+// a color passed from the .cs file. Changes to how it updates must be made there
+float4 curColor;
+
+void DoUpdateRule(uint3 id, int oldSpecies, int newSpecies) {
+    switch (UpdateRule) {
+    // Basic rule 1: set updated pixels to global random color
+    case 0:
+        if (newSpecies != oldSpecies) {
+            Colors[id.xy] = curColor;
+        }
+        break;
+
+    // Basic rule 2: increment updated pixels color by color
+    case 1:
+        if (newSpecies != oldSpecies) {
+            float4 pixelColor = Colors[id.xy];
+            if (pixelColor.g + PixelChangeScale < 1) {
+                pixelColor.g += PixelChangeScale;
+            } else if (pixelColor.r + PixelChangeScale < 1) {
+                pixelColor.r += PixelChangeScale;
+            } else if (pixelColor.b + PixelChangeScale < 1) {
+                pixelColor.b += PixelChangeScale;
+            }
+            Colors[id.xy] = pixelColor;
+        }
+        break;
+
+    case 2:
+    //Basic rule 3: increment updated pixels black and white
+        if (newSpecies != oldSpecies) {
+            float4 pixelColor = Colors[id.xy];
+            pixelColor.r -= PixelChangeScale;
+            pixelColor.g -= PixelChangeScale;
+            pixelColor.b -= PixelChangeScale;
+            Colors[id.xy] = pixelColor;
+        }
+        break;
+    default:
+    // combination of rules 1 and 3
+
+        if (newSpecies != oldSpecies) {
+            if (newSpecies > oldSpecies) {
+                float4 pixelColor = Colors[id.xy];
+                pixelColor.r -= PixelChangeScale;
+                pixelColor.g -= PixelChangeScale;
+                pixelColor.b -= PixelChangeScale;
+                Colors[id.xy] = pixelColor;
+            } else {
+                Colors[id.xy] = curColor;
+            }
+        }
+        break;
+    }
+}
+
+int GetBufferIdx(int x, int y) {
+    // given a pixel location, return the index in the buffer
+    return (y * Width + x) % (Width * Height);
+}
+
+float random(float2 p)
+{
+    // deterministic pseudorandom generator using the pixel location and a (more real) random number which is constant for the frame
+	float3 p3  = frac(float3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z + RngOffset);
+}
+
+int GetSpeciesFromColor(float4 color) {
+    // given a color, return the species it represents
+    // each channel (rgba) is used as a bool, for 16 species total
+    int species = 0;
+    if (color.r > 0.5f) {
+        species += 4;
+    }
+    if (color.g > 0.5f) {
+        species += 2;
+    }
+    if (color.b > 0.5f) {
+        species += 1;
+    }
+    if (color.a > 0.5f) {
+        species += 8;
+    }
+    return species;
+}
+
+float4 GetColorFromSpecies(uint species) {
+    // given a species, return the color used to represent it
+    return float4((species >> 2) & 1, (species >> 1) & 1, species & 1, (species >> 3) & 1);
+}
+
+
+int GetMostCommonSpecies(uint3 id, uint neighborCounts[16]) {
+    // count how many most common species there are, and how many of each there are
+    uint mostPopulous = 0;
+    uint numMostPopulous = 0;
+
+    // slightly funky alg that overwrites the occurences of species it has already read
+    // will create a state where all species with the most occurences are grouped at the start of the array
+    for (uint i = 0; i < 16; i++) {
+        if (neighborCounts[i] == mostPopulous) {
+            neighborCounts[numMostPopulous] = i;
+            numMostPopulous++;
+        } else if (neighborCounts[i] > mostPopulous) {
+            numMostPopulous = 1;
+            mostPopulous = neighborCounts[i];
+            neighborCounts[0] = i;
+        }
+    }
+
+    if (mostPopulous == 8) {
+        // if a cell is surrounded by one species, it goes to sleep
+        Sleeping[GetBufferIdx(id.x, id.y)] = 0;
+    }
+
+    // pick a random species with the most occurences
+    int randomSpeciesIdx = int(random(id.xy) * numMostPopulous);
+    return neighborCounts[randomSpeciesIdx];
+}
+
+
+int GetNextSpecies(uint3 id, float2 position, float2 pixelSize) {
+
+    // count number of occurences of each species among neighbors
+    // initialize neighborCounts with 0s
+    uint neighborCounts[16];
+    for (int i=0; i < 16; i++) {
+        neighborCounts[i] = 0;
+    }
+
+    // iterate over adjecent cells and count species
+    float species;
+    for (int dx = -1; dx < 2; dx++) {
+        for (int dy = -1; dy < 2; dy++) {
+            if (dx == 0 && dy == 0) { continue; }
+            species = GetSpeciesFromColor(tex2Dlod(Input, float4(position + float2(dx * pixelSize.x, dy * pixelSize.y), 0, 0)));
+            neighborCounts[species]++;
+        }
+    }
+
+    int nextSpeciesIdx = GetMostCommonSpecies(id, neighborCounts);
+
+    return nextSpeciesIdx;
+}
+
+
+[numthreads(8,8,1)]
+void GeneSheep (uint3 id : SV_DispatchThreadID)
+{
+    if (Sleeping[GetBufferIdx(id.x, id.y)] == 0) {
+        NumSleeping[0]++;
+        return;
+    }
+
+    // get position and pixel size for accessing textures
+    float2 position = float2(id.x, id.y) / float2(Width, Height);
+    float2 pixelSize = 1.0 / float2(Width, Height);
+    
+    // find what species and colorthis pixel will turn into
+    int nextSpecies = GetNextSpecies(id, position, pixelSize);
+    float4 nextSpeciesColor = GetColorFromSpecies(nextSpecies);
+
+    // update this pixels species
+    Result[id.xy] = nextSpeciesColor;
+
+    // check what species this pixel was, and apply the update function
+    int currentSpecies = GetSpeciesFromColor(tex2Dlod(Input, float4(position, 0, 0)));
+    
+    DoUpdateRule(id, currentSpecies, nextSpecies);
+
+    if (currentSpecies != nextSpecies) {
+        NumChanges[0]++;
+        // if the species changed, wake up all neighbors (this is done in another shader)
+        for (int i=-1; i< 2; i++) {
+            for (int j=-1; j< 2; j++) {
+                WillWake[GetBufferIdx(id.x + i, id.y + j)] = 1;
+            }
+        }
+    }
+}

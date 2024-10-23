@@ -1,0 +1,19 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel OrAndSet
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWBuffer<int> Target;
+RWBuffer<int> Source;
+int Width;
+int Val;
+
+[numthreads(8,8,1)]
+void OrAndSet (uint3 id : SV_DispatchThreadID)
+{
+    int idx = id.y * Width + id.x;
+    if (Target[idx] == 0 && Source[idx] == 1) {
+        Target[idx] = 1;
+    }
+    Source[idx] = Val;
+}

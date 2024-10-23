@@ -1,0 +1,16 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel GeneSheepSetConstant
+float4 Color;
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+
+[numthreads(8,8,1)]
+void GeneSheepSetConstant (uint3 id : SV_DispatchThreadID)
+{
+    // set the visible output to a base color
+    // if I knew how to use non-compute shaders this would not be a compute shader
+    Result[id.xy] = Color;
+}
