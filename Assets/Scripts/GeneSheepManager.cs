@@ -107,10 +107,12 @@ public class GeneSheepManager : MonoBehaviour
                 SaveToFile();
             }
 
-            if (queuedRestart) {
-                queuedRestart = false;
-                Restart();
-            }
+            
+        }
+
+        if (queuedRestart) {
+            queuedRestart = false;
+            Restart();
         }
 
         if (isDone && autoRestart) {

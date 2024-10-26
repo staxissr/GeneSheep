@@ -71,7 +71,7 @@ void DoUpdateRule(uint3 id, int oldSpecies, int newSpecies) {
 
 int GetBufferIdx(int x, int y) {
     // given a pixel location, return the index in the buffer
-    return (y * Width + x) % (Width * Height);
+    return ((y % Height) * Width + (x % Width));
 }
 
 float random(float2 p)
