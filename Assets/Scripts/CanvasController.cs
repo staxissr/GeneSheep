@@ -27,6 +27,7 @@ public class CanvasController : MonoBehaviour
     public Slider speciesSlider;
     public TextMeshProUGUI speciesSliderLabel;
     public Toggle autoRestartToggle;
+    public Toggle savePixelInfoToggle;
     public TMP_Dropdown secondaryView;
     public TMP_Dropdown updateRule;
 
@@ -51,6 +52,8 @@ public class CanvasController : MonoBehaviour
         restartButton.onClick.AddListener(delegate { OnRestartButtonClicked(); });
 
         autoRestartToggle.onValueChanged.AddListener(delegate { OnAutoRestartChanged(); });
+
+        savePixelInfoToggle.onValueChanged.AddListener(delegate { OnSavePixelInfoChanged(); });
         
         geneSheepManager = Camera.main.GetComponent<GeneSheepManager>();
         drawTextureScript = secondaryCamera.GetComponent<DrawTexture>();
@@ -107,6 +110,10 @@ public class CanvasController : MonoBehaviour
 
     void OnAutoRestartChanged() {
         geneSheepManager.autoRestart = autoRestartToggle.isOn;
+    }
+
+    void OnSavePixelInfoChanged() {
+        geneSheepManager.savePixelInfo = savePixelInfoToggle.isOn;
     }
 
     void OnDimensionsChanged() {

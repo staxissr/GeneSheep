@@ -1,6 +1,10 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.Serialization.Formatters.Binary;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -21,15 +25,18 @@ public class GeneSheepManager : MonoBehaviour
     public ComputeShader geneSheepSetConstant;
     public ComputeShader setBufferConstant;
     public ComputeShader orAndSet;
+    public ComputeShader setStructuredBufferConstant;
     private int setConstantKernel;
     private int bufferConstantKernel;
     private int kernel;
     private int randomizerKernel;
     private int orAndSetKernel;
+    private int structedBufferConstantKernel;
     public RenderTexture prevRenderTex;
     public RenderTexture nextRenderTex;
     public ComputeBuffer sleeping;
     private ComputeBuffer willWake;
+    private ComputeBuffer pixelInfoBuffer;
     
     public RenderTexture colorTexture;
     private Vector4 curColor;
@@ -40,6 +47,7 @@ public class GeneSheepManager : MonoBehaviour
     public Camera secondaryCamera;
     public bool isDone = false;
     public bool autoRestart = true;
+    public bool savePixelInfo = false;
     public bool queuedSave = false;
     public bool queuedRestart = false;
     public bool randomStartColor = false;
@@ -47,6 +55,23 @@ public class GeneSheepManager : MonoBehaviour
     public int updateRule = 0;
     public Color startColor = Color.black;
     bool skip = true;
+
+    [Serializable]
+    //[StructLayout(LayoutKind.Sequential, Pack = 1)]
+    unsafe struct PixelInfo {
+        //[MarshalAs(UnmanagedType.U8)]
+        public uint lastUpdateFrame;
+        
+        //[MarshalAs(UnmanagedType.U8)]
+        public uint numUpdates;
+        //[MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+        public fixed uint neighbors[8];
+    }
+
+    [Serializable]
+    private struct Wrapper<T> {
+        public T[] items;
+    }
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination) 
     {
@@ -77,6 +102,8 @@ public class GeneSheepManager : MonoBehaviour
         numSleepingBuffer = new ComputeBuffer(1, sizeof(int));
         bufferConstantKernel = setBufferConstant.FindKernel("SetBufferConstant");
         kernel = geneSheep.FindKernel("GeneSheep");
+        geneSheep.SetInt("Iterations", iterations);
+        structedBufferConstantKernel = setStructuredBufferConstant.FindKernel("SetStructuredBufferConstant");
 
         orAndSetKernel = orAndSet.FindKernel("OrAndSet");
         orAndSet.SetInt("Val", 0);
@@ -123,6 +150,7 @@ public class GeneSheepManager : MonoBehaviour
 
     void Restart() {
         isDone = false;
+        iterations = 0;
         if (randomStartColor) {
             curColor = new Vector4( UnityEngine.Random.Range(0f, 1f), UnityEngine.Random.Range(0f, 1f), UnityEngine.Random.Range(0f, 1f), 1);
         } else {
@@ -142,6 +170,11 @@ public class GeneSheepManager : MonoBehaviour
         orAndSet.SetInt("Width", width);
         orAndSet.SetBuffer(orAndSetKernel, "Source", willWake);
         orAndSet.SetBuffer(orAndSetKernel, "Target", sleeping);
+
+        pixelInfoBuffer = new ComputeBuffer(width * height, sizeof(uint) * 10);
+        setStructuredBufferConstant.SetInt("Width", width);
+        setStructuredBufferConstant.SetBuffer(structedBufferConstantKernel, "PixelInfoBuffer", pixelInfoBuffer);
+        setStructuredBufferConstant.Dispatch(structedBufferConstantKernel, width / 8, height / 8, 1);
 
 
 
@@ -176,22 +209,48 @@ public class GeneSheepManager : MonoBehaviour
         geneSheep.SetBuffer(kernel, "NumSleeping", numSleepingBuffer);
         geneSheep.SetBuffer(kernel, "Sleeping", sleeping);
         geneSheep.SetBuffer(kernel, "WillWake", willWake);
+        geneSheep.SetBuffer(kernel, "PixelInfoBuffer", pixelInfoBuffer);
 
         secondaryCamera.GetComponent<DrawTexture>().reInit = true;
     }
 
     void SaveToFile() {
+        
+        string dirPath = Application.dataPath + "/../SavedImages/";
+        if(!System.IO.Directory.Exists(dirPath)) {
+            System.IO.Directory.CreateDirectory(dirPath);
+        }
+        SaveImage(dirPath);
+        if (savePixelInfo) {
+            SavePixelInfo(dirPath);
+        }
+    }
+
+    void SaveImage(string dirPath) {
         RenderTexture.active = colorTexture;
         Texture2D tex = new Texture2D(width, height, TextureFormat.RGB24, false);
         tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
         tex.Apply();
         byte[] pngBytes = tex.EncodeToPNG();
-        var dirPath = Application.dataPath + "/../SavedImages/";
-        if(!System.IO.Directory.Exists(dirPath)) {
-            System.IO.Directory.CreateDirectory(dirPath);
-        }
         string dateTimeStr = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
         System.IO.File.WriteAllBytes(dirPath + "Image" + dateTimeStr + ".png", pngBytes);
+    }
+
+    void SavePixelInfo(string dirPath) {
+        string dateTimeStr = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+        var file = File.CreateText(dirPath + "PixelInfo" + dateTimeStr + ".txt");
+        PixelInfo[] pixelInfoArray = new PixelInfo[pixelInfoBuffer.count];
+        UnityEngine.Debug.Log(pixelInfoBuffer.stride);
+        //UnityEngine.Debug.Log(pixelInfoArray.getstr);
+        
+        pixelInfoBuffer.GetData(pixelInfoArray);
+        Wrapper<PixelInfo> wrapper = new Wrapper<PixelInfo>();
+        wrapper.items = pixelInfoArray;
+        //UnityEngine.Debug.Log(pixelInfoArray[0].lastUpdateFrame);
+        file.Write(JsonUtility.ToJson(wrapper));
+        file.Close();
+
+        
     }
 
     void DoTimeStep(bool getNumChanges=false) {
@@ -207,6 +266,7 @@ public class GeneSheepManager : MonoBehaviour
 
     
         // set the rng, color, and texture parameters, then dispatch to run a timestep
+        geneSheep.SetInt("Iterations", iterations);
         geneSheep.SetTexture(kernel, "Input", prevRenderTex);
         geneSheep.SetTexture(kernel, "Result", nextRenderTex);
         geneSheep.SetFloat("RngOffset", UnityEngine.Random.Range(0.0f, 1.0f));

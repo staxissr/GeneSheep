@@ -1,0 +1,25 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel SetStructuredBufferConstant
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+uint Width;
+static const uint zeros[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+struct PixelInfo {
+    uint lastUpdateFrame;
+    uint numUpdates;
+    uint neighbors[8];
+};
+
+RWStructuredBuffer<PixelInfo> PixelInfoBuffer;
+
+[numthreads(8,8,1)]
+void SetStructuredBufferConstant (uint3 id : SV_DispatchThreadID)
+{
+    PixelInfo pixel;
+    pixel.lastUpdateFrame = 0;
+    pixel.numUpdates = 0;
+    pixel.neighbors = zeros;
+    PixelInfoBuffer[id.y * Width + id.x] = pixel;
+}

@@ -26,6 +26,9 @@
 # Visual Studio cache directory
 .vs/
 
+# no reason to upload images
+/SavedImages/
+
 # Gradle cache directory
 .gradle/
 

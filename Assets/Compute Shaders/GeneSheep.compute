@@ -2,6 +2,7 @@
 #pragma kernel GeneSheep
 
 int UpdateRule;
+uint Iterations;
 float Width;
 float Height;
 float RngOffset;
@@ -13,6 +14,14 @@ RWTexture2D<float4> Result;
 RWTexture2D<float4> Colors;
 RWBuffer<uint> Sleeping;
 RWBuffer<uint> WillWake;
+
+struct PixelInfo {
+    uint lastUpdateFrame;
+    uint numUpdates;
+    uint neighbors[8];
+};
+
+RWStructuredBuffer<PixelInfo> PixelInfoBuffer;
 
 // a color passed from the .cs file. Changes to how it updates must be made there
 float4 curColor;
@@ -146,7 +155,7 @@ int GetNextSpecies(uint3 id, float2 position, float2 pixelSize) {
     }
 
     // iterate over adjecent cells and count species
-    float species;
+    int species;
     for (int dx = -1; dx < 2; dx++) {
         for (int dy = -1; dy < 2; dy++) {
             if (dx == 0 && dy == 0) { continue; }
@@ -186,11 +195,20 @@ void GeneSheep (uint3 id : SV_DispatchThreadID)
     DoUpdateRule(id, currentSpecies, nextSpecies);
 
     if (currentSpecies != nextSpecies) {
+        int species;
         NumChanges[0]++;
+        int bufferIdx = GetBufferIdx(id.x, id.y);
+        int neighborIdx = 0;
+        PixelInfoBuffer[bufferIdx].lastUpdateFrame = Iterations;
+        PixelInfoBuffer[bufferIdx].numUpdates++;
         // if the species changed, wake up all neighbors (this is done in another shader)
-        for (int i=-1; i< 2; i++) {
-            for (int j=-1; j< 2; j++) {
-                WillWake[GetBufferIdx(id.x + i, id.y + j)] = 1;
+        for (int dx=-1; dx< 2; dx++) {
+            for (int dy=-1; dy< 2; dy++) {
+                WillWake[GetBufferIdx(id.x + dx, id.y + dy)] = 1;
+                if (dx == 0 && dy == 0) { continue; }
+                species = GetSpeciesFromColor(tex2Dlod(Input, float4(position + float2(dx * pixelSize.x, dy * pixelSize.y), 0, 0)));
+                PixelInfoBuffer[bufferIdx].neighbors[neighborIdx] = species;
+                neighborIdx++;
             }
         }
     }
